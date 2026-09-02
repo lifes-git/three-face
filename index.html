@@ -1,0 +1,304 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>얼굴 특징 측정의 취약함</title>
+<style>
+* { box-sizing:border-box; margin:0; padding:0; }
+html, body { height:100%; }
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Apple SD Gothic Neo', sans-serif;
+  background:#fff; color:#1a1a1a; font-size:14px;
+  -webkit-font-smoothing:antialiased; padding:16px;
+}
+.grid {
+  display:grid; grid-template-columns: minmax(0,1fr) 216px;
+  gap:20px; align-items:start; height:100%;
+}
+@media (max-width:620px) { .grid { grid-template-columns:1fr; } }
+.stage {
+  position:relative; height:100%; min-height:340px;
+  background:#f2f1ef; border-radius:12px; overflow:hidden;
+  cursor:grab; touch-action:none;
+}
+.stage:active { cursor:grabbing; }
+.stage canvas { display:block; width:100%; height:100%; }
+.ov { position:absolute; inset:0; pointer-events:none; }
+.msg {
+  position:absolute; inset:0; display:flex; flex-direction:column;
+  align-items:center; justify-content:center; gap:8px;
+  font-size:13px; color:#999; text-align:center; padding:20px;
+}
+.spin {
+  width:24px; height:24px; border:2px solid #ddd;
+  border-top-color:#378ADD; border-radius:50%;
+  animation:sp .8s linear infinite;
+}
+@keyframes sp { to { transform:rotate(360deg); } }
+.hint {
+  position:absolute; bottom:8px; left:0; right:0;
+  text-align:center; font-size:12px; color:#999; pointer-events:none;
+}
+.side { display:flex; flex-direction:column; }
+.feat {
+  display:flex; justify-content:space-between;
+  padding:8px 0; border-bottom:1px solid #eee; font-size:13px;
+}
+.feat:last-of-type { border-bottom:none; }
+.fk { color:#888; }
+.fv { font-family:'SF Mono','Menlo','Consolas',monospace; }
+.sw { display:inline-block; width:8px; height:8px; border-radius:2px; margin-right:6px; vertical-align:1px; }
+.warn { margin-top:12px; font-size:13px; padding:9px 12px; border-radius:8px; line-height:1.5; }
+.row { display:flex; align-items:center; gap:12px; margin-top:12px; }
+.row label { font-size:13px; color:#888; min-width:36px; }
+.row output { font-size:13px; min-width:46px; text-align:right; }
+input[type=range] { flex:1; accent-color:#378ADD; }
+.reset {
+  margin-top:10px; padding:6px 12px; font-size:12px;
+  border:1px solid #ddd; border-radius:8px; background:#fff;
+  color:#666; cursor:pointer; font-family:inherit;
+}
+.reset:hover { background:#f5f5f5; }
+</style>
+</head>
+<body>
+
+<div class="grid">
+  <div style="display:flex;flex-direction:column;height:100%">
+    <div class="stage" id="stage">
+      <svg class="ov" id="ov" viewBox="0 0 400 360" preserveAspectRatio="none"></svg>
+      <div class="msg" id="msg"><div class="spin"></div><div>모델 불러오는 중</div></div>
+      <div class="hint" id="hint" style="display:none">드래그해서 얼굴을 돌려보세요</div>
+    </div>
+    <div class="row">
+      <label>조명</label>
+      <input type="range" id="lit" min="20" max="180" value="100" step="1">
+      <output id="litO">100%</output>
+    </div>
+  </div>
+
+  <div class="side">
+    <div class="feat">
+      <span class="fk"><span class="sw" style="background:#7F77DD"></span>눈 사이 거리</span>
+      <span class="fv" id="v1">-</span>
+    </div>
+    <div class="feat">
+      <span class="fk"><span class="sw" style="background:#1D9E75"></span>코 길이</span>
+      <span class="fv" id="v2">-</span>
+    </div>
+    <div class="feat">
+      <span class="fk"><span class="sw" style="background:#EF9F27"></span>입 너비</span>
+      <span class="fv" id="v3">-</span>
+    </div>
+    <div class="feat">
+      <span class="fk">밝기 대비</span>
+      <span class="fv" id="v4">-</span>
+    </div>
+    <div class="warn" id="warn"></div>
+    <button class="reset" onclick="resetView()">정면으로 되돌리기</button>
+  </div>
+</div>
+
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+  }
+}
+</script>
+
+<script type="module">
+import * as THREE from 'three';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+
+const stage = document.getElementById('stage');
+let W = stage.clientWidth || 620;
+let H = stage.clientHeight || 360;
+
+const scene = new THREE.Scene();
+const cam = new THREE.PerspectiveCamera(30, W / H, 0.01, 100);
+cam.position.set(0, 0, 1);
+
+const rend = new THREE.WebGLRenderer({ antialias:true, alpha:true });
+rend.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+rend.setSize(W, H);
+rend.outputColorSpace = THREE.SRGBColorSpace;
+stage.insertBefore(rend.domElement, stage.firstChild);
+
+const key = new THREE.DirectionalLight(0xfff2e6, 2.6);
+key.position.set(-3, 4, 6);
+scene.add(key);
+const rim = new THREE.DirectionalLight(0xdce8ff, 0.8);
+rim.position.set(5, 1, -3);
+scene.add(rim);
+const amb = new THREE.AmbientLight(0xffffff, 0.6);
+scene.add(amb);
+
+const grp = new THREE.Group();
+scene.add(grp);
+
+let PT = null, ready = false, BASE = null;
+let ry = 0, rx = 0;
+
+/* 모델 경로 후보 — 순서대로 시도 */
+const SOURCES = [
+  './LeePerrySmith.glb',
+  'https://cdn.jsdelivr.net/gh/mrdoob/three.js@dev/examples/models/gltf/LeePerrySmith/LeePerrySmith.glb',
+  'https://threejs.org/examples/models/gltf/LeePerrySmith/LeePerrySmith.glb'
+];
+
+const loader = new GLTFLoader();
+
+function tryLoad(i) {
+  if (i >= SOURCES.length) {
+    document.getElementById('msg').innerHTML =
+      '<div>모델을 불러오지 못했습니다</div>' +
+      '<div style="font-size:11px">LeePerrySmith.glb 파일을 index.html과 같은 폴더에 넣어주세요</div>';
+    return;
+  }
+  loader.load(
+    SOURCES[i],
+    (gltf) => {
+      const root = gltf.scene;
+      root.traverse((o) => {
+        if (o.isMesh) {
+          o.material = new THREE.MeshStandardMaterial({
+            color: 0xd9b79b, roughness: 0.58, metalness: 0.02
+          });
+        }
+      });
+      grp.add(root);
+      fitAndMark(root);
+      onReady();
+    },
+    undefined,
+    () => tryLoad(i + 1)
+  );
+}
+tryLoad(0);
+
+function fitAndMark(obj) {
+  const box = new THREE.Box3().setFromObject(obj);
+  const c = box.getCenter(new THREE.Vector3());
+  const s = box.getSize(new THREE.Vector3());
+  obj.position.sub(c);
+
+  cam.position.set(0, 0, s.y * 2.3);
+  cam.lookAt(0, 0, 0);
+
+  const hy = s.y / 2;
+  PT = {
+    eyeL:  new THREE.Vector3(-s.x * 0.165,  hy * 0.20,  s.z * 0.34),
+    eyeR:  new THREE.Vector3( s.x * 0.165,  hy * 0.20,  s.z * 0.34),
+    noseT: new THREE.Vector3(0,             hy * 0.22,  s.z * 0.36),
+    noseB: new THREE.Vector3(0,            -hy * 0.10,  s.z * 0.52),
+    mouL:  new THREE.Vector3(-s.x * 0.105, -hy * 0.36,  s.z * 0.34),
+    mouR:  new THREE.Vector3( s.x * 0.105, -hy * 0.36,  s.z * 0.34)
+  };
+}
+
+function onReady() {
+  document.getElementById('msg').style.display = 'none';
+  document.getElementById('hint').style.display = '';
+  ready = true;
+  update();
+}
+
+function toScreen(vec) {
+  const q = vec.clone().applyMatrix4(grp.matrixWorld).project(cam);
+  return [(q.x * 0.5 + 0.5) * 400, (-q.y * 0.5 + 0.5) * 360];
+}
+const d2 = (a, b) => Math.hypot(a[0] - b[0], a[1] - b[1]);
+const ln = (a, b, c) =>
+  `<line x1="${a[0].toFixed(1)}" y1="${a[1].toFixed(1)}" x2="${b[0].toFixed(1)}" y2="${b[1].toFixed(1)}" stroke="${c}" stroke-width="1.8" stroke-dasharray="4 3"/>`;
+
+function update() {
+  if (!ready || !PT) return;
+
+  grp.rotation.y = ry;
+  grp.rotation.x = rx;
+  grp.updateMatrixWorld(true);
+
+  const lit = +document.getElementById('lit').value;
+  document.getElementById('litO').textContent = lit + '%';
+  const br = lit / 100;
+  key.intensity = 2.6 * br;
+  rim.intensity = 0.8 * br;
+  amb.intensity = 0.6 * br;
+
+  rend.render(scene, cam);
+
+  const eL = toScreen(PT.eyeL),  eR = toScreen(PT.eyeR);
+  const nT = toScreen(PT.noseT), nB = toScreen(PT.noseB);
+  const mL = toScreen(PT.mouL),  mR = toScreen(PT.mouR);
+
+  document.getElementById('ov').innerHTML =
+    ln(eL, eR, '#7F77DD') + ln(nT, nB, '#1D9E75') + ln(mL, mR, '#EF9F27');
+
+  const eye = d2(eL, eR), nose = d2(nT, nB), mou = d2(mL, mR);
+  if (!BASE) BASE = { eye, nose, mou };
+
+  document.getElementById('v1').textContent = eye.toFixed(1);
+  document.getElementById('v2').textContent = nose.toFixed(1);
+  document.getElementById('v3').textContent = mou.toFixed(1);
+  document.getElementById('v4').textContent = br.toFixed(2);
+
+  const dev =
+    Math.abs(eye - BASE.eye) / BASE.eye +
+    Math.abs(nose - BASE.nose) / BASE.nose +
+    Math.abs(mou - BASE.mou) / BASE.mou +
+    Math.abs(br - 1);
+
+  const w = document.getElementById('warn');
+  if (dev < 0.15) {
+    w.style.background = '#EDFBF2'; w.style.color = '#1a6b3a';
+    w.textContent = '정면 기준값과 거의 같습니다';
+  } else if (dev < 0.5) {
+    w.style.background = '#FAEEDA'; w.style.color = '#854F0B';
+    w.textContent = '측정값이 흔들리기 시작합니다';
+  } else {
+    w.style.background = '#FFF0F0'; w.style.color = '#9b2121';
+    w.textContent = '같은 얼굴인데 완전히 다른 수치가 나옵니다';
+  }
+}
+
+window.resetView = function() {
+  ry = 0; rx = 0;
+  document.getElementById('lit').value = 100;
+  update();
+};
+
+document.getElementById('lit').addEventListener('input', update);
+
+let drag = false, px = 0, py = 0;
+const dn = e => { drag = true; const t = e.touches ? e.touches[0] : e; px = t.clientX; py = t.clientY; };
+const mv = e => {
+  if (!drag || !ready) return;
+  if (e.cancelable) e.preventDefault();
+  const t = e.touches ? e.touches[0] : e;
+  ry += (t.clientX - px) * 0.011;
+  rx = Math.max(-0.45, Math.min(0.45, rx - (t.clientY - py) * 0.007));
+  px = t.clientX; py = t.clientY;
+  update();
+};
+const up = () => { drag = false; };
+
+stage.addEventListener('mousedown', dn);
+window.addEventListener('mousemove', mv);
+window.addEventListener('mouseup', up);
+stage.addEventListener('touchstart', dn, { passive:true });
+stage.addEventListener('touchmove', mv, { passive:false });
+stage.addEventListener('touchend', up);
+
+window.addEventListener('resize', () => {
+  W = stage.clientWidth; H = stage.clientHeight;
+  cam.aspect = W / H;
+  cam.updateProjectionMatrix();
+  rend.setSize(W, H);
+  update();
+});
+</script>
+</body>
+</html>
