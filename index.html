@@ -112,6 +112,8 @@ input[type=range] { flex:1; accent-color:#378ADD; }
 <script type="module">
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import { KTX2Loader } from 'three/addons/loaders/KTX2Loader.js';
+import { MeshoptDecoder } from 'three/addons/libs/meshopt_decoder.module.js';
 
 const stage = document.getElementById('stage');
 let W = stage.clientWidth || 620;
@@ -142,33 +144,30 @@ scene.add(grp);
 let PT = null, ready = false, BASE = null;
 let ry = 0, rx = 0;
 
-/* 모델 경로 후보 — 순서대로 시도 */
+/* 모델 경로 후보 — facecap.glb 적용 */
 const SOURCES = [
-  './LeePerrySmith.glb',
-  'https://cdn.jsdelivr.net/gh/mrdoob/three.js@dev/examples/models/gltf/LeePerrySmith/LeePerrySmith.glb',
-  'https://threejs.org/examples/models/gltf/LeePerrySmith/LeePerrySmith.glb'
+  'https://cdn.jsdelivr.net/gh/mrdoob/three.js@dev/examples/models/gltf/facecap.glb',
+  'https://threejs.org/examples/models/gltf/facecap.glb'
 ];
 
+const ktx2Loader = new KTX2Loader()
+  .setTranscoderPath('https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/libs/basis/')
+  .detectSupport(rend);
+
 const loader = new GLTFLoader();
+loader.setKTX2Loader(ktx2Loader);
+loader.setMeshoptDecoder(MeshoptDecoder);
 
 function tryLoad(i) {
   if (i >= SOURCES.length) {
     document.getElementById('msg').innerHTML =
-      '<div>모델을 불러오지 못했습니다</div>' +
-      '<div style="font-size:11px">LeePerrySmith.glb 파일을 index.html과 같은 폴더에 넣어주세요</div>';
+      '<div>모델을 불러오지 못했습니다</div>';
     return;
   }
   loader.load(
     SOURCES[i],
     (gltf) => {
       const root = gltf.scene;
-      root.traverse((o) => {
-        if (o.isMesh) {
-          o.material = new THREE.MeshStandardMaterial({
-            color: 0xd9b79b, roughness: 0.58, metalness: 0.02
-          });
-        }
-      });
       grp.add(root);
       fitAndMark(root);
       onReady();
