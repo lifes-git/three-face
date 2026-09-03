@@ -188,13 +188,14 @@ function fitAndMark(obj) {
   cam.lookAt(0, 0, 0);
 
   const hy = s.y / 2;
+  // facecap.glb에 맞게 선이 모델 표면에 밀착되도록 z값을 크게 줄임
   PT = {
-    eyeL:  new THREE.Vector3(-s.x * 0.165,  hy * 0.20,  s.z * 0.34),
-    eyeR:  new THREE.Vector3( s.x * 0.165,  hy * 0.20,  s.z * 0.34),
-    noseT: new THREE.Vector3(0,             hy * 0.22,  s.z * 0.36),
-    noseB: new THREE.Vector3(0,            -hy * 0.10,  s.z * 0.52),
-    mouL:  new THREE.Vector3(-s.x * 0.105, -hy * 0.36,  s.z * 0.34),
-    mouR:  new THREE.Vector3( s.x * 0.105, -hy * 0.36,  s.z * 0.34)
+    eyeL:  new THREE.Vector3(-s.x * 0.165,  hy * 0.20,  s.z * 0.1),
+    eyeR:  new THREE.Vector3( s.x * 0.165,  hy * 0.20,  s.z * 0.1),
+    noseT: new THREE.Vector3(0,             hy * 0.22,  s.z * 0.15),
+    noseB: new THREE.Vector3(0,            -hy * 0.10,  s.z * 0.3),
+    mouL:  new THREE.Vector3(-s.x * 0.105, -hy * 0.36,  s.z * 0.1),
+    mouR:  new THREE.Vector3( s.x * 0.105, -hy * 0.36,  s.z * 0.1)
   };
 }
 
@@ -212,6 +213,11 @@ function toScreen(vec) {
 const d2 = (a, b) => Math.hypot(a[0] - b[0], a[1] - b[1]);
 const ln = (a, b, c) =>
   `<line x1="${a[0].toFixed(1)}" y1="${a[1].toFixed(1)}" x2="${b[0].toFixed(1)}" y2="${b[1].toFixed(1)}" stroke="${c}" stroke-width="1.8" stroke-dasharray="4 3"/>`;
+const lb = (a, b, c, text) => {
+  const mx = (a[0] + b[0]) / 2;
+  const my = (a[1] + b[1]) / 2;
+  return `<text x="${mx}" y="${my - 6}" fill="${c}" font-size="12" font-weight="bold" text-anchor="middle" style="text-shadow: 1px 1px 2px #fff, -1px -1px 2px #fff, 1px -1px 2px #fff, -1px 1px 2px #fff;">${text}</text>`;
+};
 
 function update() {
   if (!ready || !PT) return;
@@ -234,7 +240,9 @@ function update() {
   const mL = toScreen(PT.mouL),  mR = toScreen(PT.mouR);
 
   document.getElementById('ov').innerHTML =
-    ln(eL, eR, '#7F77DD') + ln(nT, nB, '#1D9E75') + ln(mL, mR, '#EF9F27');
+    ln(eL, eR, '#7F77DD') + lb(eL, eR, '#7F77DD', '눈 사이 거리') +
+    ln(nT, nB, '#1D9E75') + lb(nT, nB, '#1D9E75', '코 길이') +
+    ln(mL, mR, '#EF9F27') + lb(mL, mR, '#EF9F27', '입 너비');
 
   const eye = d2(eL, eR), nose = d2(nT, nB), mou = d2(mL, mR);
   if (!BASE) BASE = { eye, nose, mou };
